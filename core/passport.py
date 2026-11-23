@@ -15,6 +15,8 @@ from datetime import date
 from mrz.checker.td3 import TD3CodeChecker
 
 TD3_LINE_LENGTH = 44
+NAME_FIELD_START = 5
+MIN_FILLER_RUN = 3
 MAX_COMPACT_OFFSETS = 240
 MRZ_LINE_PATTERN = re.compile(r"[A-Z0-9<]{40,46}")
 NON_MRZ_CHARS = re.compile(r"[^A-Z0-9<]")
@@ -56,15 +58,17 @@ class Extraction:
     sources: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     mrz_lines: list[str] = field(default_factory=list)
+    mrz_original_lines: list[str] = field(default_factory=list)
+    name_repaired: bool = False
 
 
 def extract_passport(text: str, mrz_text: str = "") -> Extraction:
     """Extract passport fields from page text and a dedicated MRZ OCR pass."""
     extraction = Extraction()
-    candidates = _mrz_candidates(mrz_text) + _mrz_candidates(text)
-    checker = _first_valid_checker(candidates)
+    candidates = mrz_candidates(mrz_text) + mrz_candidates(text)
+    found = _first_valid_checker(candidates)
 
-    if checker is None:
+    if found is None:
         if candidates:
             extraction.notes.append(
                 "A travel-document code was found but its check digits did not "
@@ -75,11 +79,20 @@ def extract_passport(text: str, mrz_text: str = "") -> Extraction:
                 "No machine-readable zone was detected. Enter the passport details manually."
             )
     else:
+        checker, original = found
         extraction.mrz_lines = checker.mrz_code.splitlines()
         _apply_mrz(extraction, checker)
         extraction.notes.append(
             "Machine-readable zone validated. Printed-page values were not needed."
         )
+        if original is not None:
+            extraction.mrz_original_lines = original.splitlines()
+            extraction.name_repaired = True
+            extraction.notes.append(
+                "The name line's filler characters were unclear in the photo and "
+                "were treated as padding. The original reading was kept; please "
+                "check the name."
+            )
 
     for name, labels in VISUAL_LABELS.items():
         if extraction.values.get(name):
@@ -114,7 +127,8 @@ def _apply_mrz(extraction: Extraction, checker: TD3CodeChecker) -> None:
             extraction.sources[name] = "mrz"
 
 
-def _mrz_candidates(text: str) -> list[str]:
+def mrz_candidates(text: str) -> list[str]:
+    """Plausible TD3 line pairs found in OCR text, longest lines first."""
     if not text:
         return []
     candidates: list[str] = []
@@ -140,15 +154,61 @@ def _mrz_candidates(text: str) -> list[str]:
     return candidates
 
 
-def _first_valid_checker(candidates: list[str]) -> TD3CodeChecker | None:
+def valid_mrz(code: str) -> bool:
+    """True only for a TD3 pair whose check digits validate."""
+    return _first_valid_checker([code]) is not None
+
+
+def _first_valid_checker(candidates: list[str]) -> tuple[TD3CodeChecker, str | None] | None:
+    """First valid candidate, with the original text when the name line was repaired.
+
+    Untouched readings are always preferred, so a cleanly read MRZ is never
+    altered. If no candidate validates as read, the name line's filler is
+    repaired and the check digits are required to pass again.
+    """
     for code in candidates:
-        try:
-            checker = TD3CodeChecker(code, check_expiry=False)
-        except Exception:  # noqa: BLE001 - malformed candidates are simply skipped
+        checker = _validate(code)
+        if checker is not None:
+            return checker, None
+    for code in candidates:
+        repaired = _repair_name_line(code)
+        if repaired == code:
             continue
-        if checker.result:
-            return checker
+        checker = _validate(repaired)
+        if checker is not None:
+            return checker, code
     return None
+
+
+def _validate(code: str) -> TD3CodeChecker | None:
+    try:
+        checker = TD3CodeChecker(code, check_expiry=False)
+    except Exception:  # noqa: BLE001 - malformed candidates are simply skipped
+        return None
+    return checker if checker.result else None
+
+
+def _repair_name_line(code: str) -> str:
+    """Rewrite impossible characters after the name line's padding as filler.
+
+    In a TD3 name line a single '<' separates name components and '<<' separates
+    the surname from the given names, so a run of three or more is always
+    padding and everything after it must be '<'. Photos often make OCR read
+    those chevrons as letters or digits, which fails the format check even when
+    every check digit is correct. Only the filler is rewritten; the document
+    type, the country and the name itself are never touched.
+    """
+    lines = code.splitlines()
+    if len(lines) != 2 or any(len(line) != TD3_LINE_LENGTH for line in lines):
+        return code
+    name_line = lines[0]
+    filler = "<" * MIN_FILLER_RUN
+    for index in range(NAME_FIELD_START, TD3_LINE_LENGTH - MIN_FILLER_RUN + 1):
+        if name_line[index : index + MIN_FILLER_RUN] != filler:
+            continue
+        repaired = name_line[:index] + "<" * (TD3_LINE_LENGTH - index)
+        return "\n".join([repaired, lines[1]])
+    return code
 
 
 def _clean(value: str) -> str:

@@ -88,8 +88,8 @@ with st.form("read_passport"):
         type=DOCUMENT_TYPES,
         accept_multiple_files=False,
         help=(
-            "Image or PDF. The machine-readable zone at the bottom of the "
-            "passport is read automatically."
+            "Image or PDF. The machine-readable zone is read automatically, "
+            "including scans that are upright, sideways or upside-down."
         ),
     )
     read = st.form_submit_button(
@@ -120,6 +120,17 @@ else:
 
 if extraction.notes:
     st.info("\n\n".join(f"- {note}" for note in extraction.notes))
+
+if "mrz" in {
+    extraction.sources.get("surname", ""),
+    extraction.sources.get("given_names", ""),
+}:
+    st.warning(
+        "The name is read from the machine-readable zone, which has no check "
+        "digit for the name. Check it against the printed page before you "
+        "verify this candidate.",
+        title="Verify the name yourself",
+    )
 
 with st.form("save_candidate"):
     st.subheader("Check the details")
