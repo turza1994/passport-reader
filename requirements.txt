@@ -1,0 +1,9 @@
+streamlit==1.67.0
+pytesseract==0.3.13
+Pillow==13.0.0
+pypdf==7.1.1
+PyMuPDF==1.26.3
+mrz==0.6.2
+
+# Development only
+ty==0.0.108

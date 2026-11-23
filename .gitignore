@@ -1,0 +1,49 @@
+# Local app data: SQLite database and uploaded passport/supporting-document scans.
+# Contains personal data, never commit it.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Tooling / type checkers
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.ty_cache/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Streamlit / logs
+*.log
+logs/
+
+# Freebuff local project state
+.freebuff/
+
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
